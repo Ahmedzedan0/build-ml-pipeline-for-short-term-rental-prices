@@ -5,7 +5,7 @@ on the price of similar properties. Your company receives new data in bulk every
 to be retrained with the same cadence, necessitating an end-to-end pipeline that can be reused.
 
 In this project you will build such a pipeline.
-
+wandb Link:https://wandb.ai/llmsoie/nyc_airbnb?nw=nwuserzedan6250
 ## Table of contents
 
 - [Introduction](#build-an-ML-Pipeline-for-Short-Term-Rental-Prices-in-NYC)
