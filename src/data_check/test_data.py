@@ -1,117 +1,77 @@
-"""
-Purpose: Define and execute the ML pipeline for short-term rental price prediction.
-File name: main.py
-Author: Zidane
-Date: 08-07-2024
-"""
+import pandas as pd
+import numpy as np
+import scipy.stats
 
-import json
-import mlflow
-import tempfile
-import os
-import wandb
-import hydra
-from omegaconf import DictConfig
 
-_steps = [
-    "download",
-    "basic_cleaning",
-    "data_check",
-    "data_split",
-    "train_random_forest",
-    # NOTE: We do not include this in the steps so it is not run by mistake.
-    # You first need to promote a model export to "prod" before you can run this,
-    # then you need to run this step explicitly
-#    "test_regression_model"
-]
+def test_column_names(data):
 
-@hydra.main(config_name='config')
-def go(config: DictConfig):
+    expected_colums = [
+        "id",
+        "name",
+        "host_id",
+        "host_name",
+        "neighbourhood_group",
+        "neighbourhood",
+        "latitude",
+        "longitude",
+        "room_type",
+        "price",
+        "minimum_nights",
+        "number_of_reviews",
+        "last_review",
+        "reviews_per_month",
+        "calculated_host_listings_count",
+        "availability_365",
+    ]
+
+    these_columns = data.columns.values
+
+    # This also enforces the same order
+    assert list(expected_colums) == list(these_columns)
+
+
+def test_neighborhood_names(data):
+
+    known_names = ["Bronx", "Brooklyn", "Manhattan", "Queens", "Staten Island"]
+
+    neigh = set(data['neighbourhood_group'].unique())
+
+    # Unordered check
+    assert set(known_names) == set(neigh)
+
+
+def test_proper_boundaries(data: pd.DataFrame):
     """
-    Main function to execute the ML pipeline steps as per the configuration.
-
-    Parameters:
-    config (DictConfig): Configuration object automatically created by Hydra.
+    Test proper longitude and latitude boundaries for properties in and around NYC
     """
+    idx = data['longitude'].between(-74.25, -73.50) & data['latitude'].between(40.5, 41.2)
 
-    # Setup the wandb experiment. All runs will be grouped under this name
-    os.environ["WANDB_PROJECT"] = config["main"]["project_name"]
-    os.environ["WANDB_RUN_GROUP"] = config["main"]["experiment_name"]
+    assert np.sum(~idx) == 0
 
-    # Steps to execute
-    steps_par = config['main']['steps']
-    active_steps = steps_par.split(",") if steps_par != "all" else _steps
 
-    # Move to a temporary directory
-    with tempfile.TemporaryDirectory() as tmp_dir:
+def test_similar_neigh_distrib(data: pd.DataFrame, ref_data: pd.DataFrame, kl_threshold: float):
+    """
+    Apply a threshold on the KL divergence to detect if the distribution of the new data is
+    significantly different than that of the reference dataset
+    """
+    dist1 = data['neighbourhood_group'].value_counts().sort_index()
+    dist2 = ref_data['neighbourhood_group'].value_counts().sort_index()
 
-        if "download" in active_steps:
-            # Download file and load in W&B
-            _ = mlflow.run(
-                f"{config['main']['components_repository']}/get_data",
-                "main",
-                version='main',
-                parameters={
-                    "sample": config["etl"]["sample"],
-                    "artifact_name": "sample.csv",
-                    "artifact_type": "raw_data",
-                    "artifact_description": "Raw file as downloaded"
-                },
-            )
+    assert scipy.stats.entropy(dist1, dist2, base=2) < kl_threshold
 
-        if "basic_cleaning" in active_steps:
-            _ = mlflow.run(
-                os.path.join(hydra.utils.get_original_cwd(), "src", "basic_cleaning"),
-                "main",
-                parameters={
-                    "input_artifact": "sample.csv:latest",
-                    "output_artifact": "clean_sample.csv",
-                    "output_type": "clean_sample",
-                    "output_description": "Data with outliers and null values removed",
-                    "min_price": config['etl']['min_price'],
-                    "max_price": config['etl']['max_price']
-                },
-            )
 
-        if "data_check" in active_steps:
-            _ = mlflow.run(
-                os.path.join(hydra.utils.get_original_cwd(), "src", "data_check"),
-                "main",
-                parameters={
-                    "csv": "clean_sample.csv:latest",
-                    "ref": "clean_sample.csv:reference",
-                    "kl_threshold": config["data_check"]["kl_threshold"],
-                    "min_price": config["etl"]["min_price"],
-                    "max_price": config["etl"]["max_price"]
-                },
-            )
+########################################################
+# Implement here test_row_count and test_price_range   #
+########################################################
 
-        if "data_split" in active_steps:
-            ##################
-            # Implement here #
-            ##################
-            pass
+def test_row_count(data: pd.DataFrame):
+    """
+    Check if the dataset is composed by the correct number of rows
+    """
+    assert 15000 < data.shape[0] < 1000000
 
-        if "train_random_forest" in active_steps:
-            # NOTE: we need to serialize the random forest configuration into JSON
-            rf_config = os.path.abspath("rf_config.json")
-            with open(rf_config, "w+") as fp:
-                json.dump(dict(config["modeling"]["random_forest"].items()), fp)  # DO NOT TOUCH
-
-            # NOTE: use the rf_config we just created as the rf_config parameter for the train_random_forest
-            # step
-
-            ##################
-            # Implement here #
-            ##################
-
-            pass
-
-        if "test_regression_model" in active_steps:
-            ##################
-            # Implement here #
-            ##################
-            pass
-
-if __name__ == "__main__":
-    go()
+def test_price_range(data: pd.DataFrame, min_price: float, max_price: float):
+    """
+    Check if the price variable is between the correct range of values
+    """
+    assert data['price'].between(min_price, max_price).all()
