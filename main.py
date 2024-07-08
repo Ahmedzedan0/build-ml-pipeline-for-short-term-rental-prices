@@ -8,6 +8,7 @@ import json
 import mlflow
 import tempfile
 import os
+import wandb
 import hydra
 from omegaconf import DictConfig
 
@@ -63,6 +64,13 @@ def go(config: DictConfig):
                 },
             )
 
+            # Ensure the cleaned data is tagged as 'reference' in W&B
+            run = wandb.init(job_type="basic_cleaning", resume=True)
+            artifact = run.use_artifact('clean_sample.csv:latest')
+            artifact.aliases.append('reference')
+            artifact.save()
+            run.finish()
+
         if "data_check" in active_steps:
             _ = mlflow.run(
                 os.path.join(hydra.utils.get_original_cwd(), "src", "data_check"),
@@ -94,6 +102,13 @@ def go(config: DictConfig):
             rf_config = os.path.join(tmp_dir, "rf_config.json")
             with open(rf_config, "w") as fp:
                 json.dump(dict(config["modeling"]["random_forest"].items()), fp)
+
+            # Debugging: List all artifacts
+            run = wandb.init(job_type="train_random_forest", resume=True)
+            artifacts = run.logged_artifacts()
+            for artifact in artifacts:
+                print(f"Artifact: {artifact.name} - {artifact.version}")
+            run.finish()
 
             # Use the rf_config we just created as the rf_config parameter for the train_random_forest step
             _ = mlflow.run(
